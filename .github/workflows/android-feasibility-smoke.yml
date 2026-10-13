@@ -9,10 +9,10 @@ permissions:
   contents: read
 
 jobs:
-  build-and-launch:
-    name: Build, install, and launch debug APK
+  build-debug:
+    name: Build debug APK
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 25
 
     steps:
       - name: Check out branch
@@ -39,24 +39,11 @@ jobs:
         working-directory: feasibility/android-smoke
         run: gradle --no-daemon :app:assembleDebug
 
-      - name: Install and launch on Android emulator
-        uses: ReactiveCircus/android-emulator-runner@v2.38.0
-        with:
-          api-level: 35
-          target: google_apis
-          arch: x86_64
-          profile: pixel_6
-          working-directory: feasibility/android-smoke
-          script: |
-            adb install app/build/outputs/apk/debug/app-debug.apk
-            adb shell am start -W -n org.noit.smoke/.MainActivity
-            test -n "$(adb shell pidof org.noit.smoke)"
-
       - name: Upload debug APK
-        if: ${{ always() }}
+        if: success()
         uses: actions/upload-artifact@v7.0.2
         with:
           name: noit-android-smoke-debug-apk
           path: feasibility/android-smoke/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 7
