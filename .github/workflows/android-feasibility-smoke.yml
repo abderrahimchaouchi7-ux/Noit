@@ -9,10 +9,10 @@ permissions:
   contents: read
 
 jobs:
-  build-debug:
-    name: Build debug APK
+  build-and-launch:
+    name: Build, install, and launch debug APK
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
 
     steps:
       - name: Check out branch
@@ -36,14 +36,75 @@ jobs:
           packages: 'platforms;android-35 build-tools;35.0.0 platform-tools'
 
       - name: Build debug APK
+        id: build
         working-directory: feasibility/android-smoke
-        run: gradle --no-daemon :app:assembleDebug
+        run: gradle --no-daemon :app:assembleDebug 2>&1 | tee "$GITHUB_WORKSPACE/android-smoke-build.log"
+
+      - name: Install and launch on Android emulator
+        id: emulator
+        uses: ReactiveCircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          working-directory: feasibility/android-smoke
+          script: |
+            set -euo pipefail
+            log="$GITHUB_WORKSPACE/android-smoke-emulator.log"
+            apk="app/build/outputs/apk/debug/app-debug.apk"
+            echo '=== Emulator devices ===' | tee -a "$log"
+            adb devices -l 2>&1 | tee -a "$log"
+            echo '=== APK file ===' | tee -a "$log"
+            ls -lh "$apk" 2>&1 | tee -a "$log"
+            test -s "$apk"
+            echo '=== Install ===' | tee -a "$log"
+            adb install -r "$apk" 2>&1 | tee -a "$log"
+            echo 'INSTALL_OK' | tee -a "$log"
+            echo '=== Launch ===' | tee -a "$log"
+            start_output="$(adb shell am start -W -n org.noit.smoke/.MainActivity 2>&1)"
+            printf '%s\n' "$start_output" | tee -a "$log"
+            case "$start_output" in
+              *'Status: ok'*) echo 'LAUNCH_OK' | tee -a "$log" ;;
+              *) echo 'LAUNCH_FAILED' | tee -a "$log"; exit 1 ;;
+            esac
+            pid_output="$(adb shell pidof org.noit.smoke 2>&1 | tr -d '\r')"
+            printf 'APP_PID=%s\n' "$pid_output" | tee -a "$log"
+            test -n "$pid_output"
+
+      - name: Publish concise CI results
+        if: always()
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          EMULATOR_OUTCOME: ${{ steps.emulator.outcome }}
+        run: |
+          printf 'Build: %s\nEmulator install/launch: %s\n' "$BUILD_OUTCOME" "$EMULATOR_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Android smoke-test results::build=$BUILD_OUTCOME; emulator=$EMULATOR_OUTCOME"
+          if [ -f android-smoke-build.log ]; then
+            result="$(grep -E 'BUILD (SUCCESSFUL|FAILED)' android-smoke-build.log | tail -n 1 || true)"
+            if [ -n "$result" ]; then echo "::notice title=Gradle result::$result"; fi
+          fi
+          if [ -f android-smoke-emulator.log ]; then
+            if grep -qx 'INSTALL_OK' android-smoke-emulator.log; then echo '::notice title=Emulator install::INSTALL_OK'; fi
+            if grep -qx 'LAUNCH_OK' android-smoke-emulator.log; then echo '::notice title=Emulator launch::LAUNCH_OK'; fi
+          fi
 
       - name: Upload debug APK
-        if: success()
+        if: always() && steps.build.outcome == 'success'
         uses: actions/upload-artifact@v7.0.2
         with:
           name: noit-android-smoke-debug-apk
           path: feasibility/android-smoke/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload build and emulator logs
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: noit-android-smoke-test-logs
+          path: |
+            android-smoke-build.log
+            android-smoke-emulator.log
+          if-no-files-found: ignore
           retention-days: 7
