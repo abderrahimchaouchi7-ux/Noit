@@ -1,0 +1,62 @@
+name: Android feasibility smoke test
+
+on:
+  push:
+    branches:
+      - arena/d1c4a8ce-noit
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-launch:
+    name: Build, install, and launch debug APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v7.0.2
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v6.4.0
+        with:
+          gradle-version: '8.9'
+          cache-disabled: true
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v2.38.0
+        with:
+          packages: 'platforms;android-35 build-tools;35.0.0 platform-tools'
+
+      - name: Build debug APK
+        working-directory: feasibility/android-smoke
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Install and launch on Android emulator
+        uses: ReactiveCircus/android-emulator-runner@v6.0.1
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          working-directory: feasibility/android-smoke
+          script: |
+            adb install app/build/outputs/apk/debug/app-debug.apk
+            adb shell am start -W -n org.noit.smoke/.MainActivity
+            test -n "$(adb shell pidof org.noit.smoke)"
+
+      - name: Upload debug APK
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4.0.4
+        with:
+          name: noit-android-smoke-debug-apk
+          path: feasibility/android-smoke/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: ignore
+          retention-days: 7
