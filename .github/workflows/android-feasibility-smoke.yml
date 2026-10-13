@@ -54,7 +54,7 @@ jobs:
 
       - name: Upload debug APK
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4.0.4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: noit-android-smoke-debug-apk
           path: feasibility/android-smoke/app/build/outputs/apk/debug/app-debug.apk
